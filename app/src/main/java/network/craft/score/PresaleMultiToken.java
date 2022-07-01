@@ -65,6 +65,11 @@ public class PresaleMultiToken extends IRC31Basic {
     }
 
     @External(readonly=true)
+    public String unrevealedURI() {
+        return this.TOBEREVEALED_URI;
+    }
+
+    @External(readonly=true)
     public boolean requireWhitelist() {
         return requireWhitelist.getOrDefault(false);
     }
@@ -215,6 +220,34 @@ public class PresaleMultiToken extends IRC31Basic {
 
         presaleLatestBlock.set(BigInteger.valueOf(Context.getBlockHeight()));
         PresalePurchase(caller, newId);
+
+        if (newId.equals(MAX_PRESALES)) {
+            _closePresale();
+        }
+    }
+
+    @External
+    public void freeMint(BigInteger _amount, Address _address) {
+        checkOwnerOrThrow();
+        Context.require(presaleOpened(), "Presale is closed");
+        Context.require(_amount.signum() > 0, "Amount should be positive");
+        Context.require(presaleId().add(_amount).compareTo(MAX_PRESALES) <= 0, "Not enough items left");
+
+        int count = _amount.intValue();
+        while (--count >= 0) {
+            _freeMint(_address);
+        }
+    }
+
+    private void _freeMint(Address _address) {
+        var newId = presaleId().add(BigInteger.ONE);
+        Context.require(newId.compareTo(MAX_PRESALES) <= 0, "All items have been minted");
+
+        super._mint(_address, newId, BigInteger.ONE);
+        super._setTokenURI(newId, TOBEREVEALED_URI);
+        presaleId.set(newId);
+
+        PresalePurchase(_address, newId);
 
         if (newId.equals(MAX_PRESALES)) {
             _closePresale();
