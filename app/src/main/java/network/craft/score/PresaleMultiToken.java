@@ -27,10 +27,12 @@ import score.annotation.Payable;
 
 import java.math.BigInteger;
 import java.util.List;
+import score.DictDB;
 
 public class PresaleMultiToken extends IRC31Basic {
     private static final BigInteger EXA = BigInteger.valueOf(1_000_000_000_000_000_000L);
     private static final Address CFT_ESCROW_ADDRESS = Address.fromString("cx9c4698411c6d9a780f605685153431dcda04609f");
+    private static final Address CRAFT_TREASURY = Address.fromString("hxde4d8d2cff324c85565778b7c5baf2acf20b5522");
     private final String TOBEREVEALED_URI;
     private final BigInteger MAX_PRESALES;
     // presale states
@@ -39,6 +41,9 @@ public class PresaleMultiToken extends IRC31Basic {
     private final VarDB<BigInteger> presaleId = Context.newVarDB("presale_id", BigInteger.class);
     private final VarDB<Address> craftEscrow = Context.newVarDB("craft_escrow_address", Address.class);
     private final VarDB<Address> treasury = Context.newVarDB("treasury_address", Address.class);
+
+    private final VarDB<BigInteger> mintLimit = Context.newVarDB("mint_limit", BigInteger.class);
+    private final DictDB<Address,BigInteger> mintCount = Context.newDictDB("mint_count", BigInteger.class);
     private final VarDB<BigInteger> presaleLatestBlock = Context.newVarDB("presale_latest_block", BigInteger.class);
     private final VarDB<Boolean> requireWhitelist = Context.newVarDB("require_whitelist", Boolean.class);
     private final EnumerableSet<Address> whitelist = new EnumerableSet<>("whitelist", Address.class);
@@ -70,6 +75,11 @@ public class PresaleMultiToken extends IRC31Basic {
     }
 
     @External(readonly=true)
+    public BigInteger maxPresale() {
+        return this.MAX_PRESALES;
+    }
+
+    @External(readonly=true)
     public boolean requireWhitelist() {
         return requireWhitelist.getOrDefault(false);
     }
@@ -77,6 +87,16 @@ public class PresaleMultiToken extends IRC31Basic {
     @External(readonly=true)
     public boolean isWhitelisted(Address _address) {
         return whitelist.contains(_address);
+    }
+
+    @External(readonly=true)
+    public BigInteger mintLimit() {
+        return mintLimit.getOrDefault(BigInteger.ZERO);
+    }
+
+    @External(readonly=true)
+    public BigInteger mintCount(Address _address) {
+        return mintCount.getOrDefault(_address, BigInteger.ZERO);
     }
 
     @External(readonly=true)
@@ -94,6 +114,12 @@ public class PresaleMultiToken extends IRC31Basic {
         checkOwnerOrThrow();
         Context.require(!presaleOpened(), "Price cannot be changed during presale");
         presalePrice.set(_price);
+    }
+
+    @External
+    public void setMintLimit(BigInteger _count) {
+        checkOwnerOrThrow();
+        mintLimit.set(_count);
     }
 
     @External
@@ -196,6 +222,9 @@ public class PresaleMultiToken extends IRC31Basic {
         if (requireWhitelist()) {
             Context.require(whitelist.contains(Context.getCaller()), "Address not whitelisted");
         }
+        if(mintLimit().compareTo(BigInteger.ZERO) > 0){
+            Context.require(mintCount(Context.getCaller()).add(_amount).compareTo(mintLimit()) < 0, "Mint limit");
+        }
         Context.require(_amount.signum() > 0, "Amount should be positive");
         Context.require(presaleId().add(_amount).compareTo(MAX_PRESALES) <= 0, "Not enough items left");
         Context.require(Context.getValue().equals(presalePrice().multiply(_amount)), "Invalid price");
@@ -215,8 +244,12 @@ public class PresaleMultiToken extends IRC31Basic {
         super._setTokenURI(newId, TOBEREVEALED_URI);
         presaleId.set(newId);
 
+        var serviceFee = presalePrice().multiply(BigInteger.valueOf(100)).divide(BigInteger.valueOf(10000));
+        var netPrice = presalePrice().subtract(serviceFee);
+
+        Context.transfer(this.CRAFT_TREASURY, serviceFee);
         // CRAFT PRESALE FEATURES LOGIC HERE
-        Context.call(presalePrice(), craftEscrow(), "presaleTxRouter", caller, treasury());
+        Context.call(netPrice, craftEscrow(), "presaleTxRouter", caller, treasury());
 
         presaleLatestBlock.set(BigInteger.valueOf(Context.getBlockHeight()));
         PresalePurchase(caller, newId);
