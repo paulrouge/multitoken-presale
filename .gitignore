@@ -3,3 +3,9 @@
 *.iml
 build
 out
+
+*/__pycache__
+gradlew
+res/*
+scripts/util/__pycache__
+venv
